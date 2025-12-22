@@ -140,6 +140,5 @@ program mk_fdeps
         write(error_unit, "(A)") msg
         call exit(1)
     end subroutine
-
 end program
 

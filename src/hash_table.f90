@@ -71,7 +71,6 @@ module hash_table_mod
         if (self%occupied .and. allocated(self%key)) then
             has_key = all(self%key == key)
         end if
-
     end function
 
     subroutine initialize(self)
@@ -102,7 +101,6 @@ module hash_table_mod
                 dummy = self%insert_iarr(tmp(i)%key, tmp(i)%data)
             end if
         end do
-
     end subroutine
 
     function get_slot(self, key, hashed) result(slot)
@@ -345,8 +343,5 @@ module hash_table_mod
         integer, intent(in) :: i, n
         next_mod = modulo(i, n) + 1
     end function
-
-    
-
 end module
 

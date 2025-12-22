@@ -81,7 +81,6 @@ module makefile_deps_mod
         else 
             output_path = output_path // path(stem_end + 1:)
         end if
-
     end function
 
     function clean_path(path) result(output_path)
@@ -352,5 +351,4 @@ module makefile_deps_mod
         call iarr_to_int32(key(1:4), from)
         call iarr_to_int32(key(5:8), to)
     end subroutine
-
 end module

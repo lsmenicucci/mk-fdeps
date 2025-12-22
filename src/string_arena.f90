@@ -141,5 +141,4 @@ module string_arena_mod
         integer(int32), intent(out) :: output 
         output = transfer(input, output)
     end subroutine
-    
 end module

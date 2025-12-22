@@ -164,7 +164,6 @@ module lexer_mod
             end do
             accept_name = .true.
         end if
-
     end function
 
     subroutine skip_line(self)
@@ -213,6 +212,5 @@ module lexer_mod
         is_letter = (char >= 'A' .and. char <= 'Z') .or. &
                     (char >= 'a' .and. char <= 'z')
     end function
-    
 end module
 

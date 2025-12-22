@@ -19,10 +19,6 @@ module minimal_parser_mod
         procedure :: on_use => empty_on_use
     end type
 
-    interface 
-    end interface
-
-
     contains
 
     subroutine process_file(self, filepath)
