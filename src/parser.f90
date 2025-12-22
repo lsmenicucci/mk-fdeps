@@ -15,6 +15,7 @@ module minimal_parser_mod
         procedure :: on_file_end => empty_on_file_end
         procedure :: on_module => empty_on_module
         procedure :: on_module_end => empty_on_module_end
+        procedure :: on_program => empty_on_program
         procedure :: on_use => empty_on_use
     end type
 
@@ -80,6 +81,17 @@ module minimal_parser_mod
                 cycle
             end if
 
+            ! Parse program declaration
+            if (lexer%accept_next("program")) then
+                call lexer%forget()
+
+                if (lexer%accept_name()) then
+                    call lexer%extract(name)
+                    if (self%on_program(filepath, name)) exit
+                end if
+                cycle
+            end if
+
             ! Parse use statement
             if (lexer%accept_next("use")) then
                 if (lexer%accept_next(",")) then
@@ -121,6 +133,12 @@ module minimal_parser_mod
     end function
 
     logical function empty_on_module_end(self, filepath, name) result(abort)
+        class(minimal_parser_t) :: self
+        character(*), intent(in) :: filepath, name
+        abort = .false.
+    end function
+
+    logical function empty_on_program(self, filepath, name) result(abort) 
         class(minimal_parser_t) :: self
         character(*), intent(in) :: filepath, name
         abort = .false.

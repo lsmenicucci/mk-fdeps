@@ -71,6 +71,7 @@ program mk_fdeps
                     
                     call get_arg(i, arg); i = i + 1
                     makefile_deps%with_ext = arg
+                    makefile_deps%replace_ext = .true.
                 else if (arg == "--strip-parents") then
                     if (i > n_args) call fail("Missing argument of --strip-parents")
                     
@@ -78,6 +79,8 @@ program mk_fdeps
                     makefile_deps%strip_parents = parse_int(arg)
 
                     if (makefile_deps%strip_parents < 0) call fail("Invalid value for --strip-parents: " // arg)
+                else if (arg == "--include-targets") then
+                    makefile_deps%include_targets = .true.
                 else if (arg == "--output") then
                     if (i > n_args) call fail("Missing argument of --output")
                     
@@ -85,6 +88,8 @@ program mk_fdeps
                 else if (arg == "--help") then
                     call print_help()
                     call exit(0)
+                else 
+                    call fail("Unrecognized option: " // arg)
                 end if
             end if
         end do
@@ -109,6 +114,9 @@ program mk_fdeps
 
         print 101, "--strip-parents", "Remove the first 'n' parents of the original path"
         print 101, "", "type: integer, default: 1"
+
+        print 101, "--include-targets", "Generate rules for files with programs in it"
+        print 101, "", "type: bool, default: absent"
 
         print 101, "--output", "Output location"
         print 101, "", "type: string"

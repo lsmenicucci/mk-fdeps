@@ -17,7 +17,6 @@ $(BUILD_DIR)/makefile_deps.o: $(BUILD_DIR)/parser.o $(BUILD_DIR)/hash_table.o $(
 main_deps = makefile_deps 
 $(BUILD_DIR)/main.o: $(main_deps:%=$(BUILD_DIR)/%.o)
 
-
 srcs = $(wildcard src/*.f90)
 target_deps = $(srcs:src/%.f90=$(BUILD_DIR)/%.o)
 

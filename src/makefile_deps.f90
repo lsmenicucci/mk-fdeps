@@ -10,18 +10,19 @@ module makefile_deps_mod
 
     type, extends(minimal_parser_t) :: makefile_deps_t
         type(string_arena_t) :: file_names, module_names
-        type(hash_table_t) :: files, modules, dependencies, providers
+        type(hash_table_t) :: files, modules, dependencies, providers, targets
         integer(int32) :: current_file, current_module
 
         character(len=:), allocatable :: with_parent, with_ext
         character(len=:), allocatable :: with_suffix, with_prefix
         integer :: strip_parents = 1
+        logical :: include_targets = .false., replace_ext = .false.
         
 
         contains
 
         procedure :: initialize 
-        procedure :: on_file, on_file_end, on_module, on_module_end, on_use
+        procedure :: on_file, on_file_end, on_module, on_module_end, on_use, on_program
         procedure :: add_file, add_module 
         procedure :: export, format_path
     end type
@@ -35,11 +36,13 @@ module makefile_deps_mod
         call self%modules%initialize()
         call self%dependencies%initialize()
         call self%providers%initialize()
+        call self%targets%initialize()
 
         call self%file_names%initialize()
         call self%module_names%initialize()
 
         self%with_ext = ".o"
+        self%replace_ext = .true.
         self%with_parent = "build/"
     end subroutine
 
@@ -73,7 +76,7 @@ module makefile_deps_mod
                         // path(parent_end + 1:stem_end - 1) &
                         // self%with_suffix
 
-        if (len_trim(self%with_ext) > 0) then
+        if (self%replace_ext) then
             output_path = output_path // self%with_ext
         else 
             output_path = output_path // path(stem_end + 1:)
@@ -139,7 +142,7 @@ module makefile_deps_mod
         character(*), intent(in) :: output
         
         integer(int32), allocatable :: module_provider(:), dependencies(:, :)
-        character(len=:), allocatable :: module, file, other_file
+        character(len=:), allocatable :: module, file, other_file, target_file, ext
         integer :: i, j, module_id, file_id, other_id
         logical :: first
         integer :: unit
@@ -189,6 +192,7 @@ module makefile_deps_mod
 
         ! sorting 'dependencies(:, i)' on 'i' would improve performance
 
+        ! Export dependencies
         do file_id = 1, self%files%count
             first = .true.
 
@@ -220,6 +224,30 @@ module makefile_deps_mod
             if (.not. first) write(unit, *)
         end do
 
+        ! Export target rule
+        if (self%include_targets) then
+            i = 0
+            first = .true. 
+            do while(self%targets%next(i))
+                associate (p_entry => self%targets%entries(i)) 
+                    call decode_dependency_key(p_entry%key, file_id, module_id)
+                end associate
+
+                file = self%file_names%get(file_id)
+
+                ext = self%with_ext
+                self%with_ext = "" ; target_file = self%format_path(file); self%with_ext = ext
+
+                other_file = self%format_path(file)
+
+                if (first) then 
+                    write(unit, *)
+                    first = .false.
+                end if
+                write(unit, "(A, ':', 1x, A)") target_file, other_file
+            end do
+        end if
+    
         if (unit /= output_unit) then
             close(unit)
         end if
@@ -263,6 +291,18 @@ module makefile_deps_mod
         abort = .false.
 
         self%current_module = self%add_module(name)
+    end function
+
+    logical function on_program(self, filepath, name) result(abort)
+        class(makefile_deps_t) :: self
+        character(*), intent(in) :: filepath, name
+
+        integer(int32) :: dep_id
+        integer(int8) :: key(8)
+        abort = .false.
+
+        call encode_dependency_key(self%current_file, 0, key)
+        dep_id = self%targets%insert(key)
     end function
 
     logical function on_use(self, filepath, name) result(abort)
