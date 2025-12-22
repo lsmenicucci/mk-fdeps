@@ -35,6 +35,7 @@ module minimal_parser_mod
         
         call lexer%load_file(filepath)
         if (self%on_file(filepath)) return
+        first = .true.
 
         do while(.not. lexer%is_eof())
             if (first) then

@@ -5,6 +5,7 @@ module lexer_mod
 
     private
     public :: lexer_t
+    public :: is_digit, is_nl, is_space, is_alphanum, is_letter
     
     type lexer_t
         character(len=:), allocatable :: buff
@@ -185,25 +186,30 @@ module lexer_mod
         class(lexer_t) :: self
     end subroutine
 
-    logical function is_space(char)
-        character(1) :: char
+    logical elemental function is_space(char)
+        character(1), intent(in) :: char
         is_space = char == ' ' .or. iachar(char) == 9
     end function
 
-    logical function is_nl(char)
-        character(1) :: char
+    logical elemental function is_nl(char)
+        character(1), intent(in) :: char
         is_nl = iachar(char) == 10
     end function
 
-    logical function is_alphanum(char)
-        character(1) :: char
+    logical elemental function is_alphanum(char)
+        character(1), intent(in) :: char
         is_alphanum = ((char >= 'A' .and. char <= 'Z') .or. &
                        (char >= 'a' .and. char <= 'z') .or. &
                        (char >= '0' .and. char <= '9'))
     end function
 
-    logical function is_letter(char)
-        character(1) :: char
+    logical elemental function is_digit(char)
+        character(1), intent(in) :: char
+        is_digit = char >= '0' .and. char <= '9'
+    end function
+
+    logical elemental function is_letter(char)
+        character(1), intent(in) :: char
         is_letter = (char >= 'A' .and. char <= 'Z') .or. &
                     (char >= 'a' .and. char <= 'z')
     end function

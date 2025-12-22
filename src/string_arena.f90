@@ -36,7 +36,8 @@ module string_arena_mod
         integer(int8), allocatable :: tmp(:)
 
         new_cap = max(self%cap * growth_factor, target_cap)
-        allocate(tmp(new_cap), source=self%buffer)
+        allocate(tmp(new_cap))
+        tmp(:self%cap) = self%buffer
         call move_alloc(from=tmp, to=self%buffer)
 
         self%cap = new_cap

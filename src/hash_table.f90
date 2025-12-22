@@ -34,16 +34,16 @@ module hash_table_mod
         contains
 
         procedure :: initialize, grow
-        procedure :: get_slot
+        procedure :: get_slot, next
 
-        procedure :: get_data_iarr, get_data_str
-        generic :: get_data => get_data_iarr, get_data_str
+        procedure :: get_data_iarr, get_data_str, get_data_idx
+        generic :: get_data => get_data_iarr, get_data_str, get_data_idx
 
         procedure :: insert_iarr, insert_str
         generic :: insert => insert_iarr, insert_str
 
-        procedure :: get_id_iarr, get_id_str
-        generic :: get_id => get_id_iarr, get_id_str
+        procedure :: get_id_iarr, get_id_str, get_id_idx
+        generic :: get_id => get_id_iarr, get_id_str, get_id_idx
     end type
 
     contains
@@ -168,6 +168,18 @@ module hash_table_mod
         end if
     end function
 
+    logical function get_data_idx(self, i, data) result(found)
+        class(hash_table_t) :: self
+        integer(int32), intent(in) :: i
+        integer(int32), intent(out) :: data
+
+        found = .false.
+        if (i < 0 .or. i > self%cap) return
+
+        found = self%entries(i)%occupied
+        data = self%entries(i)%data
+    end function
+
     integer function insert_iarr(self, key, data, existed) result(id)
         class(hash_table_t) :: self
         integer(int8), intent(in) :: key(:)
@@ -280,6 +292,33 @@ module hash_table_mod
         if (.not. self%entries(i)%occupied) then
              id = self%entries(i)%id
         end if
+    end function
+
+    integer function get_id_idx(self, i) result(id)
+        class(hash_table_t) :: self
+        integer(int32), intent(in) :: i
+
+        id = -1
+        if (i < 0 .or. i > self%cap) return
+
+        if (.not. self%entries(i)%occupied) then
+             id = self%entries(i)%id
+        end if
+    end function
+
+    logical function next(self, i)
+        class(hash_table_t) :: self
+        integer, intent(inout) :: i
+        
+        next = .false.
+        i = i + 1
+        do while (i <= self%cap)
+            if (self%entries(i)%occupied) then
+                next = .true.
+                return
+            end if
+            i = i + 1
+        end do
     end function
 
     integer(int64) function hash_str(input)
