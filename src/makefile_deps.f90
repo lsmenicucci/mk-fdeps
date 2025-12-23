@@ -3,27 +3,27 @@ module makefile_deps_mod
     use minimal_parser_mod
     use hash_table_mod
     use string_arena_mod
+    use int_arena_mod
     implicit none
 
     private
     public :: makefile_deps_t, clean_path, join_path
 
     type, extends(minimal_parser_t) :: makefile_deps_t
-        type(string_arena_t) :: file_names, module_names
-        type(hash_table_t) :: files, modules, dependencies, providers, targets
+        type(string_arena_t) :: file_names, punit_names
+        type(hash_table_t) :: files, puntis, dependencies, providers, targets, submodules
         integer(int32) :: current_file, current_module
 
         character(len=:), allocatable :: with_parent, with_ext
         character(len=:), allocatable :: with_suffix, with_prefix
         integer :: strip_parents = 1
         logical :: include_targets = .false., replace_ext = .false.
-        
 
         contains
 
         procedure :: initialize 
-        procedure :: on_file, on_file_end, on_module, on_module_end, on_use, on_program
-        procedure :: add_file, add_module 
+        procedure :: on_file, on_file_end, on_module, on_module_end, on_use, on_program, on_submodule
+        procedure :: add_file, add_punit 
         procedure :: export, format_path
     end type
 
@@ -33,13 +33,14 @@ module makefile_deps_mod
         class(makefile_deps_t) :: self
 
         call self%files%initialize()
-        call self%modules%initialize()
+        call self%puntis%initialize()
         call self%dependencies%initialize()
+        call self%submodules%initialize()
         call self%providers%initialize()
         call self%targets%initialize()
 
         call self%file_names%initialize()
-        call self%module_names%initialize()
+        call self%punit_names%initialize()
 
         self%with_ext = ".o"
         self%replace_ext = .true.
@@ -66,6 +67,7 @@ module makefile_deps_mod
         end do
         
         parent_end = index(path, "/", back=.true.)
+        parent_end = max(parent_end, 1)
 
         stem_end = parent_end + index(path(parent_end:), '.') - 1
         if (stem_end == parent_end) stem_end = len(path)
@@ -140,113 +142,164 @@ module makefile_deps_mod
         class(makefile_deps_t) :: self
         character(*), intent(in) :: output
         
-        integer(int32), allocatable :: module_provider(:), dependencies(:, :)
-        character(len=:), allocatable :: module, file, other_file, target_file, ext
-        integer :: i, j, module_id, file_id, other_id
+        integer(int32), allocatable :: provider(:)
+        logical, allocatable :: has_target(:)
+        type(int_arena_t), allocatable :: module_sub_deps(:), file_deps(:)
+        character(len=:), allocatable :: file, ext
+        character(len=:), allocatable :: module, other_file
+        integer :: i, j, mod_id, submod_id, file_id, n_deps, n_sub_deps
         logical :: first
         integer :: unit
 
-        allocate(module_provider(self%modules%count))
-        module_provider = 0
-
-        unit = output_unit
-        if (len_trim(output) > 0) then
-            open(newunit = unit, file = output, status="replace")
-        end if
+        allocate(provider(self%puntis%count))
+        provider = 0
 
         ! Find providers
         i = 0
         do while(self%providers%next(i))
             associate (p_entry => self%providers%entries(i)) 
-                call decode_dependency_key(p_entry%key, file_id, module_id)
+                call decode_dependency_key(p_entry%key, file_id, mod_id)
             end associate
             
-            if (module_provider(module_id) == 0) then
-                module_provider(module_id) = file_id
+            if (provider(mod_id) == 0) then
+                provider(mod_id) = file_id
             else
-                module = self%module_names%get(module_id)
-                file = self%file_names%get(module_provider(module_id))
-                other_file = self%file_names%get(module_provider(file_id))
+                module = self%punit_names%get(mod_id)
+                file = self%file_names%get(provider(mod_id))
+                other_file = self%file_names%get(provider(file_id))
 
                 101 FORMAT('Module ', A, ' is provided by: ', A, ' but is also declared in: ', A)
                 write(error_unit, 101) module, file, other_file
             end if
         end do
 
-        ! Find dependencies
-        allocate(dependencies(2, self%dependencies%count))
-        dependencies = 0
+        ! Save file dependencies
+        allocate(file_deps(self%file_names%size))
+        do i = 1, size(file_deps)
+            call file_deps(i)%initialize()
+        end do
 
-        j = 1
         i = 0
+        j = 1
         do while(self%dependencies%next(i))
             associate (d_entry => self%dependencies%entries(i)) 
-                call decode_dependency_key(d_entry%key, file_id, module_id)
+                call decode_dependency_key(d_entry%key, file_id, mod_id)
+            end associate
+            call file_deps(file_id)%insert([mod_id])
+        end do
+
+        ! Save submodule dependencies
+        allocate(module_sub_deps(self%punit_names%size))
+        do i = 1, size(module_sub_deps)
+            call module_sub_deps(i)%initialize()
+        end do
+
+        i = 0
+        do while(self%submodules%next(i))
+            associate (e => self%submodules%entries(i)) 
+                call decode_dependency_key(e%key, submod_id, mod_id)
+            end associate
+            call module_sub_deps(mod_id)%insert([submod_id])
+        end do
+
+        ! Add the implicit submodule dependencies to each module descendent
+        do i = 1, size(file_deps)
+            n_deps = file_deps(i)%size
+            do j = 1, n_deps
+                mod_id = file_deps(i)%buffer(j)
+                n_sub_deps = module_sub_deps(mod_id)%size
+
+                associate (sub_deps => module_sub_deps(mod_id)%buffer(:n_sub_deps) )
+                    call file_deps(i)%insert(sub_deps)
+                end associate
+            end do
+        end do
+
+        ! Export
+        unit = output_unit
+        if (len_trim(output) > 0) then
+            open(newunit = unit, file = output, status="replace")
+        end if
+
+        do i = 1, size(file_deps)
+            n_deps = file_deps(i)%size
+            associate ( deps => file_deps(i)%buffer(:n_deps) )
+                ! Convert file_deps values to file_ids
+                deps = provider(deps)
+                deps = merge(0, deps, deps == i)
+
+                ! All imports are external
+                if (all(deps == 0)) cycle
+
+                file = self%file_names%get(i)
+                file = self%format_path(file)
+                write(unit, "(A, ': ')", advance = 'no') file
+
+                first = .true.
+                do j = 1, n_deps 
+                    if (deps(j) == 0) cycle
+                    file = self%file_names%get(deps(j))
+                    file = self%format_path(file)
+
+                    if (first) then
+                        write(unit, "(A)", advance = 'no') file
+                        first = .false.
+                    else 
+                        write(unit, "(1x, A)", advance = 'no') file
+                    end if
+                end do
             end associate
 
-            dependencies(1, j) = file_id
-            dependencies(2, j) = module_id
-            j = j + 1
+            write(unit, *)
         end do
 
-        ! sorting 'dependencies(:, i)' on 'i' would improve performance
+        ! Export targets
+        if (self%include_targets) then
+            allocate(has_target(self%file_names%size), source = .false.)
 
-        ! Export dependencies
-        do file_id = 1, self%files%count
-            first = .true.
-
-            do i = 1, size(dependencies, 2)
-                if (dependencies(1, i) /= file_id) cycle
-                module_id = dependencies(2, i)
-
-                other_id = module_provider(module_id)
-                if (other_id == 0) cycle
-                if (other_id == file_id) cycle
-
-                file = self%file_names%get(file_id)
-                other_file = self%file_names%get(other_id)
-
-                if (len_trim(file) == 0) cycle
-                if (len_trim(other_file) == 0) cycle
-
-                file = self%format_path(file)
-                other_file = self%format_path(other_file)
-
-                if (first) then
-                    write(unit, "(A, ':', 1x, A)", advance = "no") file, other_file
-                    first = .false.
-                else 
-                    write(unit, "(1x, A)", advance = "no") other_file
-                end if
+            i = 0
+            j = 1
+            do while(self%targets%next(i))
+                associate (d_entry => self%targets%entries(i)) 
+                    call decode_dependency_key(d_entry%key, file_id, mod_id)
+                end associate
+                has_target(file_id) = .true.
             end do
 
-            if (.not. first) write(unit, *)
-        end do
+            if (.not. any(has_target)) return
+            write(unit, *)
 
-        ! Export target rule
-        if (self%include_targets) then
-            i = 0
-            first = .true. 
-            do while(self%targets%next(i))
-                associate (p_entry => self%targets%entries(i)) 
-                    call decode_dependency_key(p_entry%key, file_id, module_id)
+            do i = 1, self%file_names%size
+                if (.not. has_target(i)) cycle
+
+                n_deps = file_deps(i)%size
+                associate ( deps => file_deps(i)%buffer(:n_deps) )
+                    file = self%file_names%get(i)
+
+                    ! format executable name
+                    ext = self%with_ext ; self%with_ext = ""
+                    file = self%format_path(file)
+                    self%with_ext = ext
+
+                    other_file = self%file_names%get(i)
+                    other_file = self%format_path(other_file)
+
+                    write(unit, "(A, ': ', A)", advance = 'no') file, other_file
+
+                    do j = 1, n_deps 
+                        if (deps(j) == 0) cycle
+                        file = self%file_names%get(deps(j))
+                        file = self%format_path(file)
+
+                        write(unit, "(1x, A)", advance = 'no') file
+                    end do
                 end associate
 
-                file = self%file_names%get(file_id)
-
-                ext = self%with_ext
-                self%with_ext = "" ; target_file = self%format_path(file); self%with_ext = ext
-
-                other_file = self%format_path(file)
-
-                if (first) then 
-                    write(unit, *)
-                    first = .false.
-                end if
-                write(unit, "(A, ':', 1x, A)") target_file, other_file
+                write(unit, *)
             end do
+
         end if
-    
+
         if (unit /= output_unit) then
             close(unit)
         end if
@@ -276,7 +329,7 @@ module makefile_deps_mod
         integer(int8) :: key(8)
         abort = .false.
 
-        self%current_module = self%add_module(name)
+        self%current_module = self%add_punit(name)
         call encode_dependency_key(self%current_file, self%current_module, key)
         dep_id = self%providers%insert(key)
     end function
@@ -289,7 +342,7 @@ module makefile_deps_mod
         logical :: existed
         abort = .false.
 
-        self%current_module = self%add_module(name)
+        self%current_module = self%add_punit(name)
     end function
 
     logical function on_program(self, filepath, name) result(abort)
@@ -304,16 +357,46 @@ module makefile_deps_mod
         dep_id = self%targets%insert(key)
     end function
 
+    logical function on_submodule(self, filepath, ancestor, parent, name) result(abort)
+        class(makefile_deps_t) :: self
+        character(*), intent(in) :: filepath, ancestor, parent, name
+        
+        integer :: punit_id, submod_id, dep_id
+        integer(int8) :: key(8)
+        abort = .false.
+
+        submod_id = self%add_punit(name)
+        punit_id  = self%add_punit(ancestor)
+
+        call encode_dependency_key(self%current_file, submod_id, key)
+        dep_id = self%providers%insert(key)
+
+        ! Add submodule host dependency
+        call encode_dependency_key(submod_id, punit_id, key)
+        dep_id = self%submodules%insert(key)
+
+        call encode_dependency_key(self%current_file, punit_id, key)
+        dep_id = self%dependencies%insert(key)
+
+        ! Add submodule ancestor dependency
+        if (len_trim(parent) > 0) then
+            punit_id = self%add_punit(parent)
+            call encode_dependency_key(self%current_file, punit_id, key)
+            dep_id = self%dependencies%insert(key)
+        end if
+         
+    end function
+
     logical function on_use(self, filepath, name) result(abort)
         class(makefile_deps_t) :: self
         character(*), intent(in) :: filepath, name
         
-        integer :: module_id, dep_id
+        integer :: punit_id, dep_id
         integer(int8) :: key(8)
         abort = .false.
         
-        module_id = self%add_module(name)
-        call encode_dependency_key(self%current_file, module_id, key)
+        punit_id = self%add_punit(name)
+        call encode_dependency_key(self%current_file, punit_id, key)
         dep_id = self%dependencies%insert(key)
     end function
 
@@ -326,14 +409,14 @@ module makefile_deps_mod
         if (.not. existed) call self%file_names%insert(name)
     end function
 
-    integer function add_module(self, name) result(id)
+    integer function add_punit(self, name) result(id)
         class(makefile_deps_t) :: self
         character(*), intent(in) :: name
 
         logical :: existed
 
-        id = self%modules%insert(name, existed = existed)
-        if (.not. existed) call self%module_names%insert(name)
+        id = self%puntis%insert(name, existed = existed)
+        if (.not. existed) call self%punit_names%insert(name)
     end function
 
     subroutine encode_dependency_key(from, to, key)

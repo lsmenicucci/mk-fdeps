@@ -9,13 +9,13 @@ module lexer_mod
     
     type lexer_t
         character(len=:), allocatable :: buff
-        integer :: start, cur, size, non_extra
+        integer :: pos, size, non_extra
        
         contains
 
-        procedure :: load_file, current, peek, next, is_eof
-        procedure :: accept, forget, skip_line, extract
-        procedure :: accept_name, accept_next
+        procedure :: load_file, current, peek, skip_extra, is_eof
+        procedure :: accept, skip_line 
+        procedure :: accept_name, accept_skip_extra
     end type
 
     contains
@@ -39,8 +39,7 @@ module lexer_mod
 
         close(unit)
     
-        self%cur = 1
-        self%start = 1
+        self%pos = 1
         self%non_extra = 0
         self%size = size
     end subroutine
@@ -48,8 +47,8 @@ module lexer_mod
     character(1) function current(self)
         class(lexer_t) :: self
 
-        if (self%cur < self%size) then
-            current = self%buff(self%cur:self%cur)
+        if (self%pos < self%size) then
+            current = self%buff(self%pos:self%pos)
         else
             current = C_NULL_CHAR
         end if
@@ -57,41 +56,52 @@ module lexer_mod
 
     logical function is_eof(self)
         class(lexer_t) :: self
-        is_eof = self%cur >= self%size
+        is_eof = self%pos >= self%size
     end function
 
     character(1) function peek(self)
         class(lexer_t) :: self
 
-        if (self%cur + 1 <= self%size) then
-            peek = self%buff(self%cur + 1:self%cur + 1)
+        if (self%pos + 1 <= self%size) then
+            peek = self%buff(self%pos + 1:self%pos + 1)
         else
             peek = C_NULL_CHAR
         end if
     end function
 
-    subroutine next(self)
+    subroutine skip_extra(self)
         class(lexer_t) :: self
         character(1) :: p
 
-        p = self%peek()
-        if (p == C_NULL_CHAR) return
-    
         do
-            p = self%peek()
-            self%cur = self%cur + 1
+            p = self%current()
+            if (p == C_NULL_CHAR) return
 
+            ! Skip space
             if (is_space(p)) then
+                self%pos = self%pos + 1
+                cycle
+            end if
+
+            ! Skip comment
+            if (p == '!') then
+                self%pos = self%pos + 1
+                do while(.not. is_nl(self%current())) 
+                    self%pos = self%pos + 1
+                end do
+
                 cycle
             end if
 
             ! skip modern continuation
             if (p == "&") then
-                do 
-                    p = self%peek()
-                    if ((.not. is_space(p)) .and. (.not. is_nl(p))) exit
+                self%pos = self%pos + 1
+                p = self%current()
+
+                do while(is_space(p) .or. is_nl(p))
                     ! TODO: skip commentary lines
-                    self%cur = self%cur + 1
+                    self%pos = self%pos + 1
+                    p = self%current()
                 end do
 
                 cycle
@@ -103,29 +113,6 @@ module lexer_mod
         self%non_extra = self%non_extra + 1
     end subroutine
 
-    subroutine extract(self, content)
-        class(lexer_t) :: self
-        character(len=:), allocatable, intent(out) :: content
-
-        integer :: i
-
-        allocate(character(len = self%non_extra) :: content)
-
-        self%cur = self%start
-        do i = 1, self%non_extra
-            content(i:i) = self%current()
-            call self%next()
-        end do
-
-        call self%forget()
-    end subroutine
-
-    subroutine forget(self)
-        class(lexer_t) :: self
-        self%start = self%cur
-        self%non_extra = 0
-    end subroutine
-
     logical function accept(self, content)
         class(lexer_t) :: self
         character(*) :: content
@@ -134,35 +121,46 @@ module lexer_mod
         accept = .false.
         size = len(content)
         
-        if (self%cur + size > self%size) return
+        if (self%pos + size > self%size) return
 
-        accept = self%buff(self%cur : self%cur + size - 1) == content
+        accept = self%buff(self%pos : self%pos + size - 1) == content
         if (accept) then
-            self%cur = self%cur + size
+            self%pos = self%pos + size
             self%non_extra = self%non_extra + size
+            call self%skip_extra()
         end if
     end function
 
-    logical function accept_next(self, content)
+    logical function accept_skip_extra(self, content)
         class(lexer_t) :: self
         character(*) :: content
-        accept_next = accept(self, content)
-        if (accept_next) call self%next()
+        accept_skip_extra = accept(self, content)
+        if (accept_skip_extra) then
+            self%pos = self%pos - 1
+            call self%skip_extra()
+        end if
     end function
 
-    logical function accept_name(self)
+    logical function accept_name(self, name)
         class(lexer_t) :: self
+        character(len=:), allocatable, intent(out) :: name
+        integer :: start
         
         accept_name = .false.
         if (is_letter(self%current())) then
-            self%cur = self%cur + 1
-            self%non_extra = self%non_extra + 1
+            start = self%pos
 
-            do while(is_alphanum(self%current()))
-                self%cur = self%cur + 1
-                self%non_extra = self%non_extra + 1
+            self%pos = self%pos + 1
+
+            do while(is_alphanum(self%current()) .or. self%current() == "_")
+                self%pos = self%pos + 1
             end do
+
+            name = self%buff(start:self%pos - 1)
             accept_name = .true.
+
+            ! advance extra tokens
+            call self%skip_extra()
         end if
     end function
 
@@ -170,15 +168,13 @@ module lexer_mod
         class(lexer_t) :: self
 
         do while(.not. (is_nl(self%current()) .or. self%is_eof() ) )
-            call self%next()
-        end do
-        call self%next()
-
-        do while(is_space(self%current()))
-            call self%next()
+            self%pos = self%pos + 1
+            call self%skip_extra()
         end do
 
-        call self%forget()
+        self%pos = self%pos + 1
+
+        call self%skip_extra()
     end subroutine
 
     subroutine debug(self)

@@ -12,9 +12,8 @@ module minimal_parser_mod
 
         procedure :: process_file
         procedure :: on_file => empty_on_file
-        procedure :: on_file_end => empty_on_file_end
         procedure :: on_module => empty_on_module
-        procedure :: on_module_end => empty_on_module_end
+        procedure :: on_submodule => empty_on_submodule
         procedure :: on_program => empty_on_program
         procedure :: on_use => empty_on_use
     end type
@@ -25,7 +24,7 @@ module minimal_parser_mod
         class(minimal_parser_t) :: self
         character(*), intent(in) :: filepath 
 
-        character(len = :), allocatable :: name
+        character(len = :), allocatable :: name, ancestor, parent
         logical :: first, ok
 
         associate (lexer => self%lexer)
@@ -37,71 +36,62 @@ module minimal_parser_mod
         do while(.not. lexer%is_eof())
             if (first) then
                 first = .false.
+                call lexer%skip_extra()
             else
                 call lexer%skip_line()
-                call lexer%forget()
             end if
 
             ! Parse module declaration
-            if (lexer%accept_next("module")) then
-                call lexer%forget()
+            if (lexer%accept("module")) then
+                if (.not. lexer%accept_name(name)) cycle
 
-                name = ""
-                if (lexer%accept_next("procedure")) then
-                    call lexer%forget()
-                    if (.not. lexer%accept_name()) name = "procedure"
-                else if (lexer%accept_name()) then
-                    call lexer%extract(name)
-                end if
+                if (.not. is_nl(lexer%current())) cycle
 
                 ! Dispatch event
-                if (len_trim(name) > 0) then
-                    if (self%on_module(filepath, name)) exit
-                end if
-
-                cycle
-            end if
-
-            if (lexer%accept("endmodule")) then
-                ! Dispatch event
-                if (self%on_module_end(filepath, name)) exit
-                cycle
-            end if
-
-            if (lexer%accept_next("end")) then
-                if (lexer%accept_next("module")) then
-                    ! Dispatch event
-                    if (self%on_module_end(filepath, name)) exit
-                end if
-
+                if (self%on_module(filepath, name)) exit
                 cycle
             end if
 
             ! Parse program declaration
-            if (lexer%accept_next("program")) then
-                call lexer%forget()
-
-                if (lexer%accept_name()) then
-                    call lexer%extract(name)
+            if (lexer%accept("program")) then
+                if (lexer%accept_name(name)) then
                     if (self%on_program(filepath, name)) exit
                 end if
                 cycle
             end if
 
             ! Parse use statement
-            if (lexer%accept_next("use")) then
-                if (lexer%accept_next(",")) then
-                    if (lexer%accept_name()) call lexer%next()
+            if (lexer%accept("use")) then
+                if (lexer%accept(",")) then
+                    ok = lexer%accept_name(name)
                 end if
 
-                ok = lexer%accept_next("::")
-                
-                call lexer%forget()
-                if (lexer%accept_name()) then
-                    call lexer%extract(name)
+                ok = lexer%accept("::")
+
+                if (lexer%accept_name(name)) then
                     ! Dispatch event
                     if (self%on_use(filepath, name)) exit
                 end if
+
+                cycle
+            end if
+
+            ! Parse submodule
+            if (lexer%accept("submodule")) then
+                if (.not. lexer%accept("(")) cycle
+
+                if (.not. lexer%accept_name(ancestor)) cycle
+
+                parent = ""
+                if (lexer%accept(":")) then
+                    if (.not. lexer%accept_name(parent)) cycle
+                end if
+
+                if (.not. lexer%accept(")")) cycle
+
+                if (.not. lexer%accept_name(name)) cycle
+
+                if (self%on_submodule(filepath, ancestor, parent, name)) exit
 
                 cycle
             end if
@@ -128,9 +118,15 @@ module minimal_parser_mod
         abort = .false.
     end function
 
-    logical function empty_on_module_end(self, filepath, name) result(abort)
+    logical function empty_on_module_end(self, filepath) result(abort)
         class(minimal_parser_t) :: self
-        character(*), intent(in) :: filepath, name
+        character(*), intent(in) :: filepath
+        abort = .false.
+    end function
+
+    logical function empty_on_submodule(self, filepath, ancestor, parent, name) result(abort) 
+        class(minimal_parser_t) :: self
+        character(*), intent(in) :: filepath, ancestor, parent, name
         abort = .false.
     end function
 

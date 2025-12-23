@@ -1,4 +1,4 @@
-BUILD_DIR=build
+BUILD_DIR ?= build
 PREFIX ?= /usr/local/bin
 
 FC=gfortran
@@ -12,7 +12,7 @@ $(BUILD_DIR)/%.o: src/%.f90 | $(BUILD_DIR)
 
 
 $(BUILD_DIR)/parser.o: $(BUILD_DIR)/lexer.o
-$(BUILD_DIR)/makefile_deps.o: $(BUILD_DIR)/parser.o $(BUILD_DIR)/hash_table.o $(BUILD_DIR)/string_arena.o
+$(BUILD_DIR)/makefile_deps.o: $(BUILD_DIR)/parser.o $(BUILD_DIR)/hash_table.o $(BUILD_DIR)/string_arena.o $(BUILD_DIR)/int_arena.o
 
 main_deps = makefile_deps 
 $(BUILD_DIR)/main.o: $(main_deps:%=$(BUILD_DIR)/%.o)

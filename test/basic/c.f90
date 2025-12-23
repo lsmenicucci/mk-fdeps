@@ -1,4 +1,5 @@
-module c
+module &
+        c
     interface work
         module procedure work_at_c
     end interface
@@ -6,12 +7,10 @@ module c
     contains
 
     subroutine work_at_c
-        use b, only: do_work_at_b
+        use b, only: work_at_b
         call work_at_b()
     end subroutine
-end &
-    module 
-    & c
+end module c
 
 program main_c
     use c
