@@ -1,6 +1,6 @@
 # `mk-fdeps`
 
-A binary that extracts dependencies between Fortran program units across multiple files and generates corresponding Makefiler recipes. Preprocessing and submodules are supported but not widely tested, please report bugs. 
+A binary that extracts dependencies between Fortran program units across multiple files and generates corresponding Make recipes. Preprocessing and submodules are supported but not widely tested, please report bugs. 
 
 Sample output:
 ```
@@ -34,7 +34,8 @@ build/%.o: %.f90 | build
 build/%: | build
         $(FC) $(FC_FLAGS) $^ -o $@
 
-include ./deps.mk
+# import generated recipes
+include ./deps.mk 
 ```
 
 ## Usage 
