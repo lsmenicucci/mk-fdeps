@@ -40,6 +40,7 @@ include ./deps.mk
 ## Usage 
 
 ```
+$ mk-fdeps --help
 usage: mk-fdeps [source / option] ...
  Options:
        --with-prefix  Add prefix to the file stem: parent/[prefix]stem.ext
