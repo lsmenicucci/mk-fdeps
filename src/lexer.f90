@@ -6,7 +6,7 @@ module lexer_mod
 
     private
     public :: lexer_t
-    public :: is_digit, is_nl, is_space, is_alphanum, is_letter
+    public :: is_digit, is_eol, is_space, is_alphanum, is_letter
     
     type lexer_t
         character(len=:), allocatable :: buff
@@ -155,12 +155,20 @@ module lexer_mod
             ! skip modern continuation
             if (p == "&") then
                 self%pos = self%pos + 1
-                p = self%current()
 
-                do while(is_space(p) .or. is_nl(p))
-                    ! TODO: skip commentary lines
-                    self%pos = self%pos + 1
+                do 
                     p = self%current()
+
+                    if (is_space(p) .or. is_nl(p)) then
+                        self%pos = self%pos + 1
+                    else if (p == '!') then
+                        do while(.not. is_nl(self%current()))
+                            if (self%is_eof()) exit
+                            self%pos = self%pos + 1
+                        end do
+                    else 
+                        exit
+                    end if
                 end do
 
                 cycle
@@ -225,9 +233,14 @@ module lexer_mod
 
     subroutine skip_line(self)
         class(lexer_t) :: self
+        character(1) :: c
 
-        do while(.not. (is_nl(self%current()) .or. self%is_eof() ) )
+        do 
+            c = self%current()
+
+            if (is_nl(c) .or. c == ';' .or. self%is_eof()) exit
             self%pos = self%pos + 1
+
             call self%skip_extra()
         end do
 
@@ -248,6 +261,11 @@ module lexer_mod
     logical elemental function is_nl(char)
         character(1), intent(in) :: char
         is_nl = iachar(char) == 10
+    end function
+
+    logical elemental function is_eol(char)
+        character(1), intent(in) :: char
+        is_eol = is_nl(char) .or. char == ';'
     end function
 
     logical elemental function is_alphanum(char)

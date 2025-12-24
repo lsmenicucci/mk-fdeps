@@ -45,7 +45,7 @@ module minimal_parser_mod
             if (lexer%accept("module")) then
                 if (.not. lexer%accept_name(name)) cycle
 
-                if (.not. is_nl(lexer%current())) cycle
+                if (.not. is_eol(lexer%current())) cycle
 
                 ! Dispatch event
                 if (self%on_module(filepath, name)) exit
@@ -55,6 +55,9 @@ module minimal_parser_mod
             ! Parse program declaration
             if (lexer%accept("program")) then
                 if (lexer%accept_name(name)) then
+                    if (self%on_program(filepath, name)) exit
+                else if (is_eol(lexer%current())) then
+                    name = "MAIN" // "$" //filepath
                     if (self%on_program(filepath, name)) exit
                 end if
                 cycle
