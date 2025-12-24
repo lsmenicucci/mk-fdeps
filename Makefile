@@ -11,6 +11,7 @@ $(BUILD_DIR)/%.o: src/%.f90 | $(BUILD_DIR)
 	$(FC) $(FC_FLAGS) -c $< -o $@
 
 
+$(BUILD_DIR)/lexer.o: $(BUILD_DIR)/string_builder.o
 $(BUILD_DIR)/parser.o: $(BUILD_DIR)/lexer.o
 $(BUILD_DIR)/makefile_deps.o: $(BUILD_DIR)/parser.o $(BUILD_DIR)/hash_table.o $(BUILD_DIR)/string_arena.o $(BUILD_DIR)/int_arena.o
 

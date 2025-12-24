@@ -56,22 +56,26 @@ program mk_fdeps
                     
                     call get_arg(i, arg); i = i + 1
                     makefile_deps%with_prefix = arg
+
                 else if (arg == "--with-suffix") then
                     if (i > n_args) call fail("Missing argument of --with-suffix")
                     
                     call get_arg(i, arg); i = i + 1
                     makefile_deps%with_suffix = arg
+
                 else if (arg == "--with-parent") then
                     if (i > n_args) call fail("Missing argument of --with-parent")
                     
                     call get_arg(i, arg); i = i + 1
                     makefile_deps%with_parent = arg
+
                 else if (arg == "--with-ext") then
                     if (i > n_args) call fail("Missing argument of --with-ext")
                     
                     call get_arg(i, arg); i = i + 1
                     makefile_deps%with_ext = arg
                     makefile_deps%replace_ext = .true.
+
                 else if (arg == "--strip-parents") then
                     if (i > n_args) call fail("Missing argument of --strip-parents")
                     
@@ -80,14 +84,27 @@ program mk_fdeps
 
                     if (makefile_deps%strip_parents < 0) call fail("Invalid value for --strip-parents: " // arg)
                 else if (arg == "--include-targets") then
+
                     makefile_deps%include_targets = .true.
+
                 else if (arg == "--output") then
                     if (i > n_args) call fail("Missing argument of --output")
                     
                     call get_arg(i, output); i = i + 1
+
+                else if (arg == "--preprocess") then
+                    makefile_deps%lexer%preprocess = .true.
+
+                else if (arg == "--preprocessor-cmd") then
+                    if (i > n_args) call fail("Missing argument of --preprocessor-cmd")
+
+                    call get_arg(i, arg); i = i + 1
+                    makefile_deps%lexer%preprocessor_cmd = arg
+
                 else if (arg == "--help") then
                     call print_help()
                     call exit(0)
+
                 else 
                     call fail("Unrecognized option: " // arg)
                 end if
@@ -120,6 +137,12 @@ program mk_fdeps
 
         print 101, "--output", "Output location"
         print 101, "", "type: string"
+
+        print 101, "--preprocess", "Run preprocessing beforehand"
+        print 101, "", "type: bool, default: absent"
+
+        print 101, "--preprocessor-cmd", "Preprocessor command to use"
+        print 101, "", "type: string, default: 'gfortran -cpp -E'"
     end subroutine
 
     integer function parse_int(str) 

@@ -1,6 +1,7 @@
 module lexer_mod
     use, intrinsic :: iso_fortran_env, only: int64
-    use iso_c_binding, only: C_NULL_CHAR
+    use string_builder_mod
+    use iso_c_binding
     implicit none
 
     private
@@ -9,16 +10,70 @@ module lexer_mod
     
     type lexer_t
         character(len=:), allocatable :: buff
+        character(len=:), allocatable :: preprocessor_cmd
+        logical :: preprocess = .false.
         integer :: pos, size, non_extra
        
         contains
 
-        procedure :: load_file, current, peek, skip_extra, is_eof
-        procedure :: accept, skip_line 
+        procedure :: load_file, preprocess_file 
+        procedure :: current, peek, skip_extra, is_eof
+        procedure :: accept, skip_line
         procedure :: accept_name, accept_skip_extra
     end type
 
+    interface
+        function popen(command, mode) bind(C, name="popen")
+            import :: c_char, c_ptr
+            character(c_char), dimension(*) :: command
+            character(c_char), dimension(*) :: mode
+            type(c_ptr) :: popen
+        end function
+
+        function pclose(stream) bind(C, name="pclose")
+            import :: c_ptr, c_int
+            type(c_ptr), value :: stream
+            integer(c_int) :: pclose
+        end function
+
+        function fgets(buf, size, stream) bind(C, name="fgets")
+            import :: c_char, c_int, c_ptr
+            character(c_char), dimension(*) :: buf
+            integer(c_int), value :: size
+            type(c_ptr), value :: stream
+            type(c_ptr) :: fgets
+        end function
+    end interface
+
     contains
+
+    subroutine preprocess_file(self, filepath)
+        class(lexer_t) :: self
+        character(*), intent(in) :: filepath
+
+        type(string_builder_t) :: builder
+        integer, parameter :: read_size = 10 * 1024
+        character(kind = c_char, len=:), allocatable :: cmd
+        character(kind = c_char, len=read_size) :: line_buffer
+        type(c_ptr) :: fp
+        integer :: eol
+        integer(c_int) :: ok
+
+        call builder%initialize()
+        cmd = self%preprocessor_cmd // " " // filepath // C_NULL_CHAR
+        fp = popen(cmd, 'r'// C_NULL_CHAR)
+
+        do while (c_associated(fgets(line_buffer, read_size, fp)))
+            eol = index(line_buffer, C_NULL_CHAR)
+            call builder%append(line_buffer(:eol - 1))
+        end do
+
+       ok = pclose(fp) 
+
+       if (allocated(self%buff)) deallocate(self%buff)
+       allocate(character(len=builder%size) :: self%buff)
+       self%buff = builder%buffer(:builder%size)
+    end subroutine
         
     subroutine load_file(self, path)
         class(lexer_t) :: self
@@ -28,20 +83,24 @@ module lexer_mod
         integer :: unit, io_stat
         integer(int64) :: size
 
-        open(newunit = unit, file=path, status='old', access="stream")
+        if (self%preprocess) then
+            call self%preprocess_file(path)
+        else
+            open(newunit = unit, file=path, status='old', access="stream")
 
-        inquire(unit = unit, size=size, iostat=io_stat)
+            inquire(unit = unit, size=size, iostat=io_stat)
 
-        if (allocated(self%buff)) deallocate(self%buff)
-        allocate( character(len=size) :: self%buff )
+            if (allocated(self%buff)) deallocate(self%buff)
+            allocate( character(len=size) :: self%buff )
 
-        read(unit) self%buff
+            read(unit) self%buff
 
-        close(unit)
+            close(unit)
+        end if
     
         self%pos = 1
         self%non_extra = 0
-        self%size = size
+        self%size = len(self%buff)
     end subroutine
 
     character(1) function current(self)

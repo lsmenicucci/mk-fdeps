@@ -45,6 +45,8 @@ module makefile_deps_mod
         self%with_ext = ".o"
         self%replace_ext = .true.
         self%with_parent = "build/"
+
+        self%lexer%preprocessor_cmd = "gfortran -cpp -E"
     end subroutine
 
     function format_path(self, path) result(output_path)
