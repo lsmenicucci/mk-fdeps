@@ -29,7 +29,7 @@ build:
         mkdir -p $@
 
 build/%.o: %.f90 | build
-        $(FC) $(FC_FLAGS) -c $< -o $@
+        $(FC) $(FC_FLAGS) -c $^ -o $@
 
 build/%: | build
         $(FC) $(FC_FLAGS) $^ -o $@
