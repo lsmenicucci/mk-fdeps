@@ -45,6 +45,10 @@ module lexer_mod
         end function
     end interface
 
+    interface TO_lowercase
+        module procedure TO_lowercase_mkfedeps
+    end interface
+
     contains
 
     subroutine preprocess_file(self, filepath)
@@ -190,7 +194,7 @@ module lexer_mod
         
         if (self%pos + size > self%size) return
 
-        accept = self%buff(self%pos : self%pos + size - 1) == content
+        accept = TO_lowercase(self%buff(self%pos : self%pos + size - 1)) == content
         if (accept) then
             self%pos = self%pos + size
             self%non_extra = self%non_extra + size
@@ -285,5 +289,23 @@ module lexer_mod
         is_letter = (char >= 'A' .and. char <= 'Z') .or. &
                     (char >= 'a' .and. char <= 'z')
     end function
+
+    PURE FUNCTION TO_lowercase_mkfedeps(string) RESULT (lstring)
+    IMPLICIT NONE
+
+    character (len=*),         intent(in)  :: string
+    character (len=len(string))            :: lstring
+
+    integer  :: i,ascii_char
+
+    lstring = string
+
+    DO i=1,len_trim(lstring)
+      ascii_char = iachar(lstring(i:i))
+      IF (ascii_char >= 65 .AND. ascii_char <= 90) lstring(i:i) = achar(ascii_char+32)
+    END DO
+
+  END FUNCTION TO_lowercase_mkfedeps
+
 end module
 

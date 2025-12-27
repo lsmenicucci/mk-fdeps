@@ -1,5 +1,5 @@
 module subd
-    use b
+    Use b
     contains
     subroutine work_at_d()
     end subroutine

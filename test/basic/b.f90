@@ -1,6 +1,6 @@
-module b
-    use a
-    use a, only: n
+Module b
+    Use a
+    USE a, only: n
     ! use c
     
     contains
