@@ -3,7 +3,8 @@ module makefile_deps_mod
     use minimal_parser_mod
     use hash_table_mod
     use string_arena_mod
-    use int_arena_mod
+    use int_darray_mod
+    use graph_mod
     implicit none
 
     private
@@ -25,6 +26,7 @@ module makefile_deps_mod
         procedure :: on_file, on_file_end, on_module, on_module_end, on_use, on_program, on_submodule
         procedure :: add_file, add_punit 
         procedure :: export, format_path
+        procedure, private :: expand_submodule_dependencies, write_file
     end type
 
     contains
@@ -144,19 +146,40 @@ module makefile_deps_mod
         class(makefile_deps_t) :: self
         character(*), intent(in) :: output
         
-        integer(int32), allocatable :: provider(:)
+        integer(int32), allocatable :: provider(:), dependencies(:, :)
+        integer, allocatable :: csr_dep_offset(:), csr_dep(:)
         logical, allocatable :: has_target(:)
-        type(int_arena_t), allocatable :: module_sub_deps(:), file_deps(:)
         character(len=:), allocatable :: file, ext
         character(len=:), allocatable :: module, other_file
+
+        type(bfs_iterator_t) :: bfs_iterator
+        integer :: istart, iend
+
         integer :: i, j, mod_id, submod_id, file_id, n_deps, n_sub_deps
         logical :: first
         integer :: unit
 
+        call self%expand_submodule_dependencies()
+
+        allocate(dependencies(2, self%dependencies%count))
+        dependencies = 0    
+
+        ! Find edges
+        j = 1
+        i = 0
+        do while(self%dependencies%next(i))
+            associate (p_entry => self%dependencies%entries(i)) 
+                call decode_dependency_key(p_entry%key, file_id, mod_id)
+            end associate
+            dependencies(1, j) = file_id
+            dependencies(2, j) = mod_id
+            j = j + 1
+        end do
+
+        ! Find providers
         allocate(provider(self%puntis%count))
         provider = 0
 
-        ! Find providers
         i = 0
         do while(self%providers%next(i))
             associate (p_entry => self%providers%entries(i)) 
@@ -175,20 +198,97 @@ module makefile_deps_mod
             end if
         end do
 
-        ! Save file dependencies
-        allocate(file_deps(self%file_names%size))
-        do i = 1, size(file_deps)
-            call file_deps(i)%initialize()
+        ! Resolve dependencies to files
+        dependencies(2, :) = provider(dependencies(2, :))
+        dependencies(2, :) = merge(0, dependencies(2, :), dependencies(1, :) == dependencies(2, :))
+
+        call to_csr_format(dependencies, self%files%count, csr_dep_offset, csr_dep)
+
+        ! Export object rules
+        unit = output_unit
+        if (len_trim(output) > 0) then
+            open(newunit = unit, file = output, status="replace")
+        end if
+
+        do i = 1, self%files%count
+            istart = csr_dep_offset(i)
+            if (i < self%files%count) then
+                iend = csr_dep_offset(i + 1) - 1
+            else
+                iend = size(csr_dep)
+            end if
+
+            if (all(csr_dep(istart:iend) == 0)) cycle
+
+            call self%write_file(unit, i)
+            write(unit, "(A)", advance="no") ":"
+
+            do j = istart, iend
+                if (csr_dep(j) == 0) cycle
+                write(unit, "(A)", advance="no") " "
+                call self%write_file(unit, csr_dep(j))
+            end do
+
+            write(unit, *)
         end do
 
-        i = 0
-        j = 1
-        do while(self%dependencies%next(i))
-            associate (d_entry => self%dependencies%entries(i)) 
-                call decode_dependency_key(d_entry%key, file_id, mod_id)
-            end associate
-            call file_deps(file_id)%insert([mod_id])
-        end do
+        if (self%include_targets) then
+            call bfs_iterator%initialize(self%files%count)
+            write(unit, *)
+
+            i = 0
+            do while(self%targets%next(i))
+                associate (p_entry => self%targets%entries(i)) 
+                    call decode_dependency_key(p_entry%key, file_id, mod_id)
+                end associate
+
+                ! Write main dependency
+                call self%write_file(unit, file_id, "")
+                write(unit, "(A)", advance="no") ": "
+
+                call bfs_iterator%start(file_id)
+
+                do while(bfs_iterator%next(file_id, csr_dep_offset, csr_dep))
+                    if (file_id == 0) cycle
+                    
+                    call self%write_file(unit, file_id)
+                    write(unit, "(A)", advance="no") " "
+                end do
+
+                write(unit, *)
+            end do
+        end if
+
+        if (unit /= output_unit) then
+            close(unit)
+        end if
+    end subroutine
+
+    subroutine write_file(self, unit, file_id, custom_ext)
+        class(makefile_deps_t) :: self
+        integer, intent(in) :: unit, file_id
+        character(*), optional, intent(in) :: custom_ext
+
+        character(len=:), allocatable :: filepath, ext
+
+        filepath = self%file_names%get(file_id)
+        if (.not. present(custom_ext)) then
+            write(unit, "(A)", advance = 'no') self%format_path(filepath)
+        else 
+            ext = self%with_ext
+            self%with_ext = custom_ext
+            write(unit, "(A)", advance = 'no') self%format_path(filepath)
+            self%with_ext = ext
+        end if
+        
+    end subroutine
+
+    subroutine expand_submodule_dependencies(self)
+        class(makefile_deps_t) :: self
+
+        type(int_darray_t), allocatable :: module_sub_deps(:), sub_deps(:)
+        integer(int8) :: key(8)
+        integer :: file_id, mod_id, submod_id, dep_id, i, j
 
         ! Save submodule dependencies
         allocate(module_sub_deps(self%punit_names%size))
@@ -204,107 +304,30 @@ module makefile_deps_mod
             call module_sub_deps(mod_id)%insert([submod_id])
         end do
 
-        ! Add the implicit submodule dependencies to each module descendent
-        do i = 1, size(file_deps)
-            n_deps = file_deps(i)%size
-            do j = 1, n_deps
-                mod_id = file_deps(i)%buffer(j)
-                n_sub_deps = module_sub_deps(mod_id)%size
-
-                associate (sub_deps => module_sub_deps(mod_id)%buffer(:n_sub_deps) )
-                    call file_deps(i)%insert(sub_deps)
-                end associate
-            end do
+        ! Add extra dependencies for submodules
+        allocate(sub_deps(self%file_names%size)) 
+        do i = 1, size(sub_deps)
+            call sub_deps(i)%initialize()
         end do
 
-        ! Export
-        unit = output_unit
-        if (len_trim(output) > 0) then
-            open(newunit = unit, file = output, status="replace")
-        end if
-
-        do i = 1, size(file_deps)
-            n_deps = file_deps(i)%size
-            associate ( deps => file_deps(i)%buffer(:n_deps) )
-                ! Convert file_deps values to file_ids
-                deps = provider(deps)
-                deps = merge(0, deps, deps == i)
-
-                ! All imports are external
-                if (all(deps == 0)) cycle
-
-                file = self%file_names%get(i)
-                file = self%format_path(file)
-                write(unit, "(A, ': ')", advance = 'no') file
-
-                first = .true.
-                do j = 1, n_deps 
-                    if (deps(j) == 0) cycle
-                    file = self%file_names%get(deps(j))
-                    file = self%format_path(file)
-
-                    if (first) then
-                        write(unit, "(A)", advance = 'no') file
-                        first = .false.
-                    else 
-                        write(unit, "(1x, A)", advance = 'no') file
-                    end if
-                end do
+        i = 0
+        do while(self%dependencies%next(i))
+            associate (e => self%dependencies%entries(i)) 
+                call decode_dependency_key(e%key, file_id, mod_id)
             end associate
 
-            write(unit, *)
+            associate (deps => module_sub_deps(mod_id))
+                call sub_deps(file_id)%insert(deps%buffer(:deps%size))
+            end associate
         end do
 
-        ! Export targets
-        if (self%include_targets) then
-            allocate(has_target(self%file_names%size), source = .false.)
-
-            i = 0
-            j = 1
-            do while(self%targets%next(i))
-                associate (d_entry => self%targets%entries(i)) 
-                    call decode_dependency_key(d_entry%key, file_id, mod_id)
-                end associate
-                has_target(file_id) = .true.
+        ! Edit the dependency graph
+        do file_id = 1, self%file_names%size
+            do j = 1, sub_deps(file_id)%size
+                call encode_dependency_key(file_id, sub_deps(file_id)%buffer(j), key)
+                dep_id = self%dependencies%insert(key)
             end do
-
-            if (.not. any(has_target)) return
-            write(unit, *)
-
-            do i = 1, self%file_names%size
-                if (.not. has_target(i)) cycle
-
-                n_deps = file_deps(i)%size
-                associate ( deps => file_deps(i)%buffer(:n_deps) )
-                    file = self%file_names%get(i)
-
-                    ! format executable name
-                    ext = self%with_ext ; self%with_ext = ""
-                    file = self%format_path(file)
-                    self%with_ext = ext
-
-                    other_file = self%file_names%get(i)
-                    other_file = self%format_path(other_file)
-
-                    write(unit, "(A, ': ', A)", advance = 'no') file, other_file
-
-                    do j = 1, n_deps 
-                        if (deps(j) == 0) cycle
-                        file = self%file_names%get(deps(j))
-                        file = self%format_path(file)
-
-                        write(unit, "(1x, A)", advance = 'no') file
-                    end do
-                end associate
-
-                write(unit, *)
-            end do
-
-        end if
-
-        if (unit /= output_unit) then
-            close(unit)
-        end if
+        end do
     end subroutine
 
     logical function on_file(self, filepath) result(abort)
