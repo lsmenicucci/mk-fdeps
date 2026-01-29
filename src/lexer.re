@@ -37,7 +37,7 @@ typedef struct {
 
     end = "\x00";
     ws = [ \t];
-    nl = "\n" | "\r\n";
+    nl = "\n" | "\r\n" | ";";
     digit = [0-9];
     letter = [a-zA-Z];
     underscore = "_";
