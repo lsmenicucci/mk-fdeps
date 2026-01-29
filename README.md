@@ -4,16 +4,16 @@ A tool that extracts dependencies between Fortran program units across multiple 
 
 Sample output:
 ```
-$ mk-fdeps test/basic/**/*.f90 --include-targets
-build/basic/b.o: build/basic/a.o
-build/basic/c.o: build/basic/a.o build/basic/b.o
-build/basic/d.o: build/basic/b.o
-build/basic/e.o: build/basic/a.o build/basic/c.o
-build/basic/subdir/d.o: build/basic/b.o
+$ mk-fdeps test/basic/**/*.f90 --include-targets --strip-parents 2
+build/b.o: build/a.o
+build/c.o: build/a.o build/b.o
+build/d.o: build/b.o
+build/e.o: build/a.o build/c.o
+build/subdir/d.o: build/b.o
 
-build/basic/c: build/basic/c.o build/basic/a.o build/basic/b.o
-build/basic/d: build/basic/d.o build/basic/b.o
-build/basic/e: build/basic/e.o build/basic/a.o build/basic/c.o
+build/d: build/d.o build/b.o build/a.o
+build/c: build/c.o build/a.o build/b.o
+build/e: build/e.o build/a.o build/c.o build/b.o
 ```
 
 One may redirect the output to a file:
