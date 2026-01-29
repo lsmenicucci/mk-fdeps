@@ -26,81 +26,165 @@ module minimal_parser_mod
 
         character(len = :), allocatable :: name, ancestor, parent
         logical :: first, ok
+        type(token_t) :: token
 
         associate (lexer => self%lexer)
         
         call lexer%load_file(filepath)
         if (self%on_file(filepath)) return
+        
         first = .true.
+        call lexer%next_token(token)
 
-        do while(.not. lexer%is_eof())
-            if (first) then
-                first = .false.
-                call lexer%skip_extra()
-            else
-                call lexer%skip_line()
-            end if
+        do while(token%type /= LEX_EOF)  ! Use LEX_EOF constant
 
-            ! Parse module declaration
-            if (lexer%accept("module")) then
-                if (.not. lexer%accept_name(name)) cycle
-
-                if (.not. is_eol(lexer%current())) cycle
-
-                ! Dispatch event
-                if (self%on_module(filepath, name)) exit
+            ! Skip comments and newlines
+            if (token%type == LEX_NEWLINE) then
+                call lexer%next_token(token)
                 cycle
             end if
+            
+            ! Check for keywords
+            if (token%type == LEX_IDENTIFIER) then
+                select case (lexer%get_token_text(token))
+                
+                case ("module")
+                    ! Parse module declaration
+                    call lexer%next_token(token)
 
-            ! Parse program declaration
-            if (lexer%accept("program")) then
-                if (lexer%accept_name(name)) then
-                    if (self%on_program(filepath, name)) exit
-                else if (is_eol(lexer%current())) then
-                    name = "MAIN" // "$" //filepath
-                    if (self%on_program(filepath, name)) exit
-                end if
-                cycle
-            end if
-
-            ! Parse use statement
-            if (lexer%accept("use")) then
-                if (lexer%accept(",")) then
-                    ok = lexer%accept_name(name)
-                end if
-
-                ok = lexer%accept("::")
-
-                if (lexer%accept_name(name)) then
+                    if (token%type /= LEX_IDENTIFIER) then
+                        ! Skip to next line or error
+                        call skip_to_eol(lexer, token)
+                        cycle
+                    end if
+                    
+                    name = lexer%get_token_text(token)
+                    
+                    ! Check for end of statement
+                    call lexer%next_token(token)
+                    if (token%type /= LEX_NEWLINE) then
+                        ! Not valid module declaration
+                        call skip_to_eol(lexer, token)
+                        cycle
+                    end if
+                    
                     ! Dispatch event
-                    if (self%on_use(filepath, name)) exit
-                end if
-
-                cycle
+                    if (self%on_module(filepath, name)) return
+                    call skip_to_eol(lexer, token)
+                
+                case ("program")
+                    ! Parse program declaration
+                    call lexer%next_token(token)
+                    if (token%type == LEX_IDENTIFIER) then
+                        name = lexer%get_token_text(token)
+                    else
+                        ! Anonymous program
+                        name = "MAIN$" // filepath
+                    end if
+                    
+                    if (self%on_program(filepath, name)) return
+                    call skip_to_eol(lexer, token)
+                
+                case ("use")
+                    ! Parse use statement
+                    call lexer%next_token(token)
+                    
+                    ! Optional comma
+                    if (token%type == LEX_OTHER .and. lexer%get_token_text(token) == ",") then
+                        call lexer%next_token(token)
+                    end if
+                    
+                    ! Optional ::
+                    if (token%type == LEX_EQUAL .and. lexer%get_token_text(token) == "=") then
+                        call lexer%next_token(token)
+                        if (token%type == LEX_EQUAL .and. lexer%get_token_text(token) == "=") then
+                            call lexer%next_token(token)
+                        else
+                            ! Invalid
+                            call skip_to_eol(lexer, token)
+                            cycle
+                        end if
+                    end if
+                    
+                    if (token%type == LEX_IDENTIFIER) then
+                        name = lexer%get_token_text(token)
+                        if (self%on_use(filepath, name)) return
+                    end if
+                    
+                    call skip_to_eol(lexer, token)
+                
+                case ("submodule")
+                    ! Parse submodule
+                    call lexer%next_token(token)
+                    if (token%type /= LEX_OTHER .or. lexer%get_token_text(token) /= "(") then
+                        call skip_to_eol(lexer, token)
+                        cycle
+                    end if
+                    
+                    call lexer%next_token(token)
+                    if (token%type /= LEX_IDENTIFIER) then
+                        call skip_to_eol(lexer, token)
+                        cycle
+                    end if
+                    ancestor = lexer%get_token_text(token)
+                    
+                    call lexer%next_token(token)
+                    parent = ""
+                    if (token%type == LEX_OTHER .and. lexer%get_token_text(token) == ":") then
+                        call lexer%next_token(token)
+                        if (token%type == LEX_OTHER .and. lexer%get_token_text(token) == ":") then
+                            call lexer%next_token(token)
+                            if (token%type == LEX_IDENTIFIER) then
+                                parent = lexer%get_token_text(token)
+                            else
+                                call skip_to_eol(lexer, token)
+                                cycle
+                            end if
+                        else
+                            call skip_to_eol(lexer, token)
+                            cycle
+                        end if
+                        call lexer%next_token(token)
+                    end if
+                    
+                    if (token%type /= LEX_OTHER .or. lexer%get_token_text(token) /= ")") then
+                        call skip_to_eol(lexer, token)
+                        cycle
+                    end if
+                    
+                    call lexer%next_token(token)
+                    if (token%type /= LEX_IDENTIFIER) then
+                        call skip_to_eol(lexer, token)
+                        cycle
+                    end if
+                    name = lexer%get_token_text(token)
+                    
+                    if (self%on_submodule(filepath, ancestor, parent, name)) return
+                    call skip_to_eol(lexer, token)
+                
+                case default
+                    ! Not a keyword we care about, skip line
+                    call skip_to_eol(lexer, token)
+                end select
+            else
+                ! Not an identifier, skip line
+                call skip_to_eol(lexer, token)
             end if
-
-            ! Parse submodule
-            if (lexer%accept("submodule")) then
-                if (.not. lexer%accept("(")) cycle
-
-                if (.not. lexer%accept_name(ancestor)) cycle
-
-                parent = ""
-                if (lexer%accept(":")) then
-                    if (.not. lexer%accept_name(parent)) cycle
-                end if
-
-                if (.not. lexer%accept(")")) cycle
-
-                if (.not. lexer%accept_name(name)) cycle
-
-                if (self%on_submodule(filepath, ancestor, parent, name)) exit
-
-                cycle
-            end if
+            
+            call lexer%next_token(token)
         end do
 
         end associate
+    contains
+
+        subroutine skip_to_eol(lexer, token)
+            type(lexer_t) :: lexer
+            type(token_t) :: token
+            do while(token%type /= LEX_NEWLINE .and. token%type /= LEX_EOF)
+                call lexer%next_token(token)
+            end do
+        end subroutine
+
     end subroutine
 
     logical function empty_on_file(self, filepath) result(abort)

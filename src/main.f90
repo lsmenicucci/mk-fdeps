@@ -146,7 +146,6 @@ program mk_fdeps
     end subroutine
 
     integer function parse_int(str) 
-        use lexer_mod, only: is_digit
         character(*), intent(in) :: str
         integer :: i
 
@@ -155,6 +154,11 @@ program mk_fdeps
             if (.not. is_digit(str(i:i))) return
         end do
         read(str, *) parse_int
+    end function
+
+    logical elemental function is_digit(char)
+        character(1), intent(in) :: char
+        is_digit = char >= '0' .and. char <= '9'
     end function
 
     subroutine fail(msg)
