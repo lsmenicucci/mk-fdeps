@@ -58,7 +58,9 @@ module hash_table_mod
         has_key = .false.
 
         if (self%occupied .and. allocated(self%key)) then
-            has_key = all(self%key == bytes)
+            if (size(bytes) == size(self%key)) then
+                has_key = all(self%key == bytes)
+            end if
         end if
     end function
 
@@ -69,7 +71,9 @@ module hash_table_mod
         has_key = .false.
 
         if (self%occupied .and. allocated(self%key)) then
-            has_key = all(self%key == key)
+            if (size(key) == size(self%key)) then
+                has_key = all(self%key == key)
+            end if
         end if
     end function
 
